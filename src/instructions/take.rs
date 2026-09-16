@@ -134,7 +134,7 @@ pub fn process_take_instruction(accounts: &mut [AccountView], _data: &[u8]) -> P
         Seed::from(maker.address().as_array()),
         Seed::from(&bump_bytes),
     ];
-    let signer = Signer::from(&seed);
+    let seeds = [Signer::from(&seed)];
 
     pinocchio_token::instructions::Transfer {
         from: vault,
@@ -143,7 +143,7 @@ pub fn process_take_instruction(accounts: &mut [AccountView], _data: &[u8]) -> P
         multisig_signers: &[] as &[&AccountView],
         amount: vault_state_amount,
     }
-    .invoke_signed(&[signer.clone()])?;
+    .invoke_signed(&seeds)?;
 
     // 9 · CPI #3, close the vault (maker made it so they get the rent)
     pinocchio_token::instructions::CloseAccount {
@@ -152,10 +152,15 @@ pub fn process_take_instruction(accounts: &mut [AccountView], _data: &[u8]) -> P
         authority: escrow_account,
         multisig_signers: &[] as &[&AccountView],
     }
-    .invoke_signed(&[signer.clone()])?;
+    .invoke_signed(&seeds)?;
 
     // 10 · Close the escrow account, by hand
-    maker.set_lamports(maker.lamports() + escrow_account.lamports());
+    let escrow_lamports = escrow_account.lamports();
+    let maker_lamports = maker
+        .lamports()
+        .checked_add(escrow_lamports)
+        .ok_or(ProgramError::ArithmeticOverflow)?;
+    maker.set_lamports(maker_lamports);
     escrow_account.set_lamports(0);
     escrow_account.close()?;
 
